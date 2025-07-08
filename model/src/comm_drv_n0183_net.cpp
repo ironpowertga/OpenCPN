@@ -239,6 +239,7 @@ void CommDriverN0183Net::OpenNetworkUdp(unsigned int addr) {
       int broadcastEnable = 1;
       m_tsock->SetOption(SOL_SOCKET, SO_BROADCAST, &broadcastEnable,
                          sizeof(broadcastEnable));
+      m_driver_stats.available = true;
     }
   }
 
@@ -333,7 +334,7 @@ void CommDriverN0183Net::OnTimerSocket() {
       auto since_connect = steady_clock::now() - m_connect_time;
       if (since_connect > 10s && !m_is_conn_err_reported) {
         std::stringstream ss;
-        ss << "Cannot connect to remote server " << m_params.NetworkAddress
+        ss << _("Cannot connect to remote server ") << m_params.NetworkAddress
            << ":" << m_params.NetworkPort;
         CommDriverRegistry::GetInstance().evt_driver_msg.Notify(ss.str());
         m_is_conn_err_reported = true;
@@ -525,6 +526,8 @@ bool CommDriverN0183Net::SendSentenceNetwork(const wxString& payload) {
 
       } else
         ret = false;
+      m_driver_stats.available = ret;
+
       break;
     case UDP:
       udp_socket = dynamic_cast<wxDatagramSocket*>(m_tsock);
@@ -548,6 +551,7 @@ bool CommDriverN0183Net::SendSentenceNetwork(const wxString& payload) {
 
 void CommDriverN0183Net::Close() {
   MESSAGE_LOG << "Closing NMEA NetworkDataStream " << m_params.NetworkPort;
+  m_stats_timer.Stop();
   //    Kill off the TCP Socket if alive
   if (m_sock) {
     if (m_is_multicast)

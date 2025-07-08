@@ -1515,7 +1515,9 @@ bool MyFrame::DropMarker(bool atOwnShip) {
       new RoutePoint(lat, lon, g_default_wp_icon, wxEmptyString, wxEmptyString);
   pWP->m_bIsolatedMark = true;  // This is an isolated mark
   pSelect->AddSelectableRoutePoint(lat, lon, pWP);
-  pConfig->AddNewWayPoint(pWP, -1);  // use auto next num
+  // pConfig->AddNewWayPoint(pWP, -1);  // use auto next num
+  NavObj_dB::GetInstance().InsertRoutePoint(pWP);
+
   if (canvas)
     if (!RoutePointGui(*pWP).IsVisibleSelectable(canvas))
       RoutePointGui(*pWP).ShowScaleWarningMessage(canvas);
@@ -1750,7 +1752,8 @@ void MyFrame::OnCloseWindow(wxCloseEvent &event) {
 
             // caveat: this is accurate only on the Equator
             if ((l * 60. * 1852.) < (.25 * 1852.)) {
-              pConfig->DeleteWayPoint(pr);
+              // pConfig->DeleteWayPoint(pr);
+              NavObj_dB::GetInstance().DeleteRoutePoint(pr);
               pSelect->DeleteSelectablePoint(pr, SELTYPE_ROUTEPOINT);
               delete pr;
               break;
@@ -1768,7 +1771,7 @@ void MyFrame::OnCloseWindow(wxCloseEvent &event) {
       pWP->m_bShowName = false;
       pWP->m_bIsolatedMark = true;
 
-      pConfig->AddNewWayPoint(pWP, -1);  // use auto next num
+      NavObj_dB::GetInstance().InsertRoutePoint(pWP);
     }
   }
 
@@ -1780,10 +1783,6 @@ void MyFrame::OnCloseWindow(wxCloseEvent &event) {
   wxLogMessage("opencpn::MyFrame exiting cleanly.");
 
   quitflag++;
-
-  pConfig->UpdateNavObj();
-
-  pConfig->m_pNavObjectChangesSet->reset();
 
   NavObj_dB::GetInstance().Close();
 
@@ -2309,6 +2308,9 @@ void MyFrame::ODoSetSize(void) {
   }
 
 #endif
+  if (GetPrimaryCanvas() && GetPrimaryCanvas()->GetNotificationsList()) {
+    GetPrimaryCanvas()->GetNotificationsList()->RecalculateSize();
+  }
 
   if (g_pauimgr) g_pauimgr->Update();
 }
@@ -2670,9 +2672,6 @@ void MyFrame::OnToolLeftClick(wxCommandEvent &event) {
         g_bTrackCarryOver = true;
       } else {
         TrackOff(true);  // catch the last point
-        if (pConfig && pConfig->IsChangesFileDirty()) {
-          pConfig->UpdateNavObj(true);
-        }
         g_bTrackCarryOver = false;
         RefreshAllCanvas(true);
       }
@@ -2901,6 +2900,19 @@ void MyFrame::ScheduleReconfigAndSettingsReload(bool reload, bool new_dialog) {
     else
       ScheduleSettingsDialog();
   }
+  // Trying to reload the previously displayed chart by name as saved in
+  // pathArray Also, restoring the previous chart VPScale, if possible
+  // ..For each canvas...
+  for (unsigned int i = 0; i < g_canvasArray.GetCount(); i++) {
+    ChartCanvas *cc = g_canvasArray.Item(i);
+    if (cc) {
+      int index_hint = -1;
+      if (i < pathArray.GetCount())
+        index_hint = ChartData->FinddbIndex(pathArray.Item(i));
+      cc->canvasChartsRefresh(index_hint);
+      if (index_hint != -1) cc->SetVPScale(restoreScale[i]);
+    }
+  }
 }
 
 ChartCanvas *MyFrame::GetFocusCanvas() {
@@ -3088,7 +3100,7 @@ void MyFrame::ActivateMOB(void) {
       -1.0);  // Negative distance is code to signal "Never Arrive"
   pWP_MOB->SetUseSca(false);  // Do not use scaled hiding for MOB
   pSelect->AddSelectableRoutePoint(gLat, gLon, pWP_MOB);
-  pConfig->AddNewWayPoint(pWP_MOB, -1);  // use auto next num
+  NavObj_dB::GetInstance().InsertRoutePoint(pWP_MOB);
 
   if (bGPSValid && !std::isnan(gCog) && !std::isnan(gSog)) {
     //    Create a point that is one mile along the present course
@@ -3151,8 +3163,7 @@ void MyFrame::TrackOn(void) {
   g_pActiveTrack = new ActiveTrack();
 
   g_TrackList.push_back(g_pActiveTrack);
-  if (pConfig) pConfig->AddNewTrack(g_pActiveTrack);
-  NavObj_dB::GetInstance().AddNewTrack(g_pActiveTrack);
+  NavObj_dB::GetInstance().InsertTrack(g_pActiveTrack);
   g_pActiveTrack->Start();
 
   // The main toolbar may still be NULL here, and we will do nothing...
@@ -3212,6 +3223,7 @@ Track *MyFrame::TrackOff(bool do_add_point) {
         if (pExtendTrack) {
           NavObj_dB::GetInstance().DeleteTrack(g_pActiveTrack);
           RoutemanGui(*g_pRouteMan).DeleteTrack(g_pActiveTrack);
+          NavObj_dB::GetInstance().UpdateTrack(pExtendTrack);
           return_val = pExtendTrack;
         }
       }
@@ -3282,12 +3294,7 @@ bool MyFrame::ShouldRestartTrack(void) {
 
 void MyFrame::TrackDailyRestart(void) {
   if (!g_pActiveTrack) return;
-
   Track *pPreviousTrack = TrackOff(true);
-  if (pConfig && pConfig->IsChangesFileDirty()) {
-    pConfig->UpdateNavObj(true);
-  }
-
   TrackOn();
 
   //  Set the restarted track's current state such that the current track
@@ -4033,25 +4040,6 @@ void MyFrame::PrepareOptionsClose(options *settings,
   androidRestoreFullScreen();
   androidEnableRotation();
 #endif
-
-#if 0  // Maybe, TODO
-  // If needed, refresh each canvas,
-  // trying to reload the previously displayed chart by name as saved in
-  // pathArray Also, restoring the previous chart VPScale, if possible
-  if (b_refresh) {
-    // ..For each canvas...
-    for (unsigned int i = 0; i < g_canvasArray.GetCount(); i++) {
-      ChartCanvas *cc = g_canvasArray.Item(i);
-      if (cc) {
-        int index_hint = -1;
-        if (i < pathArray.GetCount())
-          index_hint = ChartData->FinddbIndex(pathArray.Item(i));
-        cc->canvasChartsRefresh(index_hint);
-        if (index_hint != -1) cc->SetVPScale(restoreScale[i]);
-      }
-    }
-  }
-#endif
 }
 
 void MyFrame::DoOptionsDialog() {
@@ -4110,7 +4098,8 @@ void MyFrame::DoOptionsDialog() {
   //  Capture the full path names and VPScale of charts currently shown in all
   //  canvases
   pathArray.Clear();
-  // ..For each canvas...
+  // ..For each canvas.
+  // TODO  FIX ANDROID codepath..
   for (unsigned int i = 0; i < g_canvasArray.GetCount(); i++) {
     ChartCanvas *cc = g_canvasArray.Item(i);
     if (cc) {
@@ -4266,17 +4255,6 @@ void MyFrame::ProcessOptionsDialog(int rr, ArrayOfCDI *pNewDirArray) {
     if (cc) cc->ApplyGlobalSettings();
   }
 
-  //    Do a full Refresh, trying to open the last open chart
-// TODO  This got move up a level.  FIX ANDROID codepath
-#if 0
-    if(b_need_refresh){
-        int index_hint = ChartData->FinddbIndex( chart_file_name );
-        if( -1 == index_hint )
-            b_autofind = true;
-        ChartsRefresh( );
-    }
-#endif
-
   //  The zoom-scale factor may have changed
   //  so, trigger a recalculation of the reference chart
   bool ztc = g_bEnableZoomToCursor;  // record the present state
@@ -4284,7 +4262,7 @@ void MyFrame::ProcessOptionsDialog(int rr, ArrayOfCDI *pNewDirArray) {
       false;  // since we don't want to pan to an unknown cursor position
 
   //  This is needed to recognise changes in zoom-scale factors
-  GetPrimaryCanvas()->DoZoomCanvas(1.0001);
+  GetPrimaryCanvas()->ZoomCanvasSimple(1.0001);
   g_bEnableZoomToCursor = ztc;
 
   //  Pick up chart object icon size changes (g_ChartScaleFactorExp)
@@ -4707,7 +4685,7 @@ void MyFrame::OnInitTimer(wxTimerEvent &event) {
         }
       }
 
-      pConfig->LoadNavObjects();
+      NavObj_dB::GetInstance().ImportLegacyNavobj(this);
       NavObj_dB::GetInstance().LoadNavObjects();
 
       //    Re-enable anchor watches if set in config file
@@ -4857,18 +4835,13 @@ void MyFrame::OnInitTimer(wxTimerEvent &event) {
         g_MainToolbar->SetAutoHideTimer(g_nAutoHideToolbar);
       }
 
-#if 0  // per-canvas toolbars deprecated in MUI
-
-            // .. for each canvas...
-            for(unsigned int i=0 ; i < g_canvasArray.GetCount() ; i++){
-                ChartCanvas *cc = g_canvasArray.Item(i);
-                cc->RequestNewCanvasToolbar( true );
-
-                if(cc && cc->GetToolbarEnable()){
-                    cc->GetToolbar()->SetAutoHide(g_bAutoHideToolbar);
-                    cc->GetToolbar()->SetAutoHideTimer(g_nAutoHideToolbar);
-                }
-            }
+#ifdef ANDROID
+      if (g_MainToolbar)
+        m_data_monitor->Move(g_MainToolbar->GetToolbarRect().x +
+                                 g_MainToolbar->GetToolbarRect().width,
+                             3 * GetCharHeight());
+#else
+      m_data_monitor->Center();
 #endif
 
       break;
@@ -4918,6 +4891,12 @@ void MyFrame::OnInitTimer(wxTimerEvent &event) {
     case 6: {
       InitAppMsgBusListener();
       InitApiListeners();
+
+      // if WMM is not in use..
+      // set the Mag Variation to the user specified value
+      auto loader = PluginLoader::GetInstance();
+      bool b_haveWMM = loader && loader->IsPlugInAvailable(_T("WMM"));
+      if (!b_haveWMM) gVar = g_UserVar;
 
       break;
     }
@@ -5039,8 +5018,9 @@ void MyFrame::HandleGPSWatchdogMsg(std::shared_ptr<const GPSWatchdogMsg> msg) {
         wxTimeSpan span = now - m_fix_start_time;
         if (span.IsLongerThan(wxTimeSpan(0, 5))) {
           auto &noteman = NotificationManager::GetInstance();
-          std::string msg = "GNSS Position fix lost";
-          noteman.AddNotification(NotificationSeverity::kCritical, msg);
+          wxString msg = _("GNSS Position fix lost");
+          noteman.AddNotification(NotificationSeverity::kCritical,
+                                  msg.ToStdString());
           m_fix_start_time = wxInvalidDateTime;
         }
       }
@@ -5911,26 +5891,6 @@ void MyFrame::OnFrameTimer1(wxTimerEvent &event) {
       m_bdefer_resize = false;
     }
   }
-
-#ifdef __ANDROID__
-
-  // Update the navobj file on a fixed schedule (5 minutes)
-  // This will do nothing if the navobj.changes file is empty and clean
-  if (((g_tick % g_FlushNavobjChangesTimeout) == 0) || g_FlushNavobjChanges) {
-    if (pConfig && pConfig->IsChangesFileDirty()) {
-      androidShowBusyIcon();
-      wxStopWatch update_sw;
-      pConfig->UpdateNavObj(true);
-      wxString msg = wxString::Format(
-          _T("OpenCPN periodic navobj update took %ld ms."), update_sw.Time());
-      wxLogMessage(msg);
-      qDebug() << msg.mb_str();
-      g_FlushNavobjChanges = false;
-      androidHideBusyIcon();
-    }
-  }
-
-#endif
 
   // Reset pending next AppMsgBus notification
 
@@ -6804,8 +6764,10 @@ void MyFrame::ActivateAISMOBRoute(const AisTargetData *ptarget) {
   pWP_MOB->SetShared(true);
   pWP_MOB->m_bIsolatedMark = true;
   pSelect->AddSelectableRoutePoint(ptarget->Lat, ptarget->Lon, pWP_MOB);
-  pConfig->AddNewWayPoint(pWP_MOB, -1);  // use auto next num
-  pWP_MOB->SetUseSca(false);             // Do not use scaled hiding for MOB
+  // pConfig->AddNewWayPoint(pWP_MOB, -1);  // use auto next num
+  NavObj_dB::GetInstance().InsertRoutePoint(pWP_MOB);
+
+  pWP_MOB->SetUseSca(false);  // Do not use scaled hiding for MOB
 
   /* We want to start tracking any MOB in range (Which will trigger false alarms
   with messages received over the network etc., but will a) not discard nearby

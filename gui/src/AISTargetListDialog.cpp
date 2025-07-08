@@ -45,6 +45,7 @@
 #include "OCPNPlatform.h"
 #include "routemanagerdialog.h"
 #include "styles.h"
+#include "model/navobj_db.h"
 
 static AisDecoder *s_p_sort_decoder;
 
@@ -985,7 +986,8 @@ void AISTargetListDialog::OnTargetCreateWpt(wxCommandEvent &event) {
                        wxEmptyString, wxEmptyString);
     pWP->m_bIsolatedMark = true;  // This is an isolated mark
     pSelect->AddSelectableRoutePoint(pAISTarget->Lat, pAISTarget->Lon, pWP);
-    pConfig->AddNewWayPoint(pWP, -1);  // use auto next num
+    // pConfig->AddNewWayPoint(pWP, -1);  // use auto next num
+    NavObj_dB::GetInstance().InsertRoutePoint(pWP);
 
     if (pRouteManagerDialog && pRouteManagerDialog->IsShown())
       pRouteManagerDialog->UpdateWptListCtrl();
@@ -1074,14 +1076,16 @@ void AISTargetListDialog::CenterToTarget(bool close) {
 
   if (pAISTarget) {
     double scale = gFrame->GetFocusCanvas()->GetVPScale();
-    gFrame->JumpToPosition(gFrame->GetFocusCanvas(), pAISTarget->Lat,
-                           pAISTarget->Lon, scale);
-    if (close) {
+    if (!close) {
+      gFrame->JumpToPosition(gFrame->GetFocusCanvas(), pAISTarget->Lat,
+                             pAISTarget->Lon, scale);
+    } else {
       // Set a resonable (1:5000) chart scale to see the target.
       if (scale < 0.7) {  // Don't zoom if already close.
         ChartCanvas *cc = gFrame->GetFocusCanvas();
         double factor = cc->GetScaleValue() / 5000.0;
-        cc->DoZoomCanvas(factor, false);
+        gFrame->JumpToPosition(gFrame->GetFocusCanvas(), pAISTarget->Lat,
+                               pAISTarget->Lon, scale * factor);
       }
       DoTargetQuery(pAISTarget->MMSI);
       // Close AIS target list
